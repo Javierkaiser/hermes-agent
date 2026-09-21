@@ -20,7 +20,17 @@ import globals from 'globals'
 
 export default [
   {
-    ignores: ['**/node_modules/**', '**/dist/**', 'src/**/*.js', '**/package-lock.json']
+    // *.generated.* is written by a generator and verified byte-for-byte against it
+    // (tests/tui_gateway/contracts/test_generated.py). `eslint --fix` stripping a rule
+    // directive out of one makes the committed file differ from what the generator emits,
+    // which reds that test on main for every PR — fix the generator, never the artefact.
+    ignores: [
+      '**/node_modules/**',
+      '**/dist/**',
+      'src/**/*.js',
+      '**/package-lock.json',
+      '**/*.generated.*'
+    ]
   },
   js.configs.recommended,
   {
