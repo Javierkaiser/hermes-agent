@@ -292,6 +292,34 @@ def codex_model_provider_id(requested_provider: str) -> Optional[str]:
 # ── identity recovery (bare "custom" -> durable ``custom:<name>``) ─────────────────────────
 
 
+def _all_custom_identities(matches: Callable[[dict[str, Any]], bool]) -> list[str]:
+    """Every configured entry where ``matches(entry)`` holds, as canonical ``custom:<name>`` slugs.
+
+    Order-preserving and de-duplicated: an entry reachable through both ``providers:`` and the
+    legacy ``custom_providers:`` view must not count twice when the caller asks *how many* entries
+    a signal selects."""
+    rp = _rp()
+    try:
+        config = rp.load_config()
+    except Exception:
+        return []
+    found: list[str] = []
+    providers = config.get("providers")
+    if isinstance(providers, dict):
+        for ep_name, entry in providers.items():
+            if isinstance(entry, dict) and matches(entry):
+                found.append(custom_provider_slug(str(ep_name), str(ep_name)))
+    try:
+        custom_providers = rp.get_compatible_custom_providers(config)
+    except Exception:
+        custom_providers = None
+    for entry in custom_providers or []:
+        name = entry.get("name") if isinstance(entry, dict) else None
+        if isinstance(name, str) and name.strip() and matches(entry):
+            found.append(custom_provider_slug(name, str(entry.get("provider_key", "") or "")))
+    return list(dict.fromkeys(found))
+
+
 def _find_custom_identity(matches: Callable[[dict[str, Any]], bool]) -> Optional[str]:
     """First entry in ``providers:`` then legacy ``custom_providers:`` where ``matches(entry)``
     holds, as its canonical ``custom:<name>`` slug."""
@@ -333,7 +361,14 @@ def _model_id_matches(value: Any, target: str) -> bool:
 def find_custom_provider_identity_by_model(model: str) -> Optional[str]:
     """Map a model id back to the ``custom:<name>`` entry that serves it — companion to
     :func:`find_custom_provider_identity` for persistence paths where no base_url survived the
-    round-trip (the session row always stores the model name)."""
+    round-trip (the session row always stores the model name).
+
+    A model id is a *weak* signal: two scopes of one relay routinely offer the same model per
+    account, and several entries then serve it. Answering the first one would bill whichever entry
+    happens to sit first in ``providers:`` — the same wrong-key failure as #118285, one layer down.
+    Ambiguity therefore answers ``None``, letting the caller fall through to a stronger signal (the
+    provider the session was actually built on) instead of inventing a scope the evidence cannot
+    pick."""
     target = str(model or "").strip().lower()
     if not target:
         return None
@@ -349,7 +384,8 @@ def find_custom_provider_identity_by_model(model: str) -> Optional[str]:
                        for item in models)
         return False
 
-    return _find_custom_identity(_entry_serves_model)
+    identities = _all_custom_identities(_entry_serves_model)
+    return identities[0] if len(identities) == 1 else None
 
 
 def _configured_custom_identity(candidate: str) -> tuple[Optional[str], str]:

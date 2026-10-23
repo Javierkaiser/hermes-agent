@@ -130,6 +130,22 @@ def test_url_only_recovery_keeps_its_contract(two_scopes_one_url):
     assert rp.canonical_custom_identity(base_url=SHARED_URL) == "custom:opencode-zen-work"
 
 
+def test_model_leg_is_ambiguous_when_two_scopes_serve_it(two_scopes_one_url):
+    """A model id that both scopes serve cannot pick one of them. Answering the first entry billed
+    the other scope's key — the #118285 wrong-key class one layer down, in the path where no
+    base_url survives the round-trip (the session row stores bare ``custom`` + the model name)."""
+    assert rp.find_custom_provider_identity_by_model(MODEL) is None
+
+
+def test_ambiguous_model_falls_through_to_the_requested_scope(two_scopes_one_url):
+    """The weak signal going silent must not short-circuit the strong one: the provider the session
+    was actually built on still decides, whichever scope it is."""
+    assert rp.canonical_custom_identity(
+        model=MODEL, config_provider="opencode-zen-personal") == "custom:opencode-zen-personal"
+    assert rp.canonical_custom_identity(
+        model=MODEL, config_provider="opencode-zen-work") == "custom:opencode-zen-work"
+
+
 def test_unconfigured_candidate_does_not_cancel_the_url_match(two_scopes_one_url):
     """Fail-closed means "never invent an identity", not "abandon one already recovered from
     the endpoint" — a stale/unknown name must not blank out a resolvable session."""
