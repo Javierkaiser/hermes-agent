@@ -146,6 +146,49 @@ def test_ambiguous_model_falls_through_to_the_requested_scope(two_scopes_one_url
         model=MODEL, config_provider="opencode-zen-work") == "custom:opencode-zen-work"
 
 
+RELAY_A = "http://127.0.0.1:8081/v1"
+RELAY_B = "http://127.0.0.1:8082/v1"
+
+
+@pytest.fixture
+def two_relays_one_model(monkeypatch):
+    """Two local relays serving one model from *different* endpoints. The model id is still shared,
+    so the ambiguity lives in the signal itself rather than in a shared URL — and the URL chain
+    cannot break the tie either, because neither endpoint is shared."""
+    config = {
+        "providers": {
+            "relay-primary": {
+                "name": "Relay Primary",
+                "api": RELAY_A,
+                "key_env": "RELAY_PRIMARY_API_KEY",
+                "models": [MODEL],
+            },
+            "relay-echo": {
+                "name": "Relay Echo",
+                "api": RELAY_B,
+                "key_env": "RELAY_ECHO_API_KEY",
+                "models": [MODEL],
+            },
+        }
+    }
+    monkeypatch.setattr(rp, "load_config", lambda *a, **k: config)
+    monkeypatch.setattr("hermes_cli.config.load_config", lambda *a, **k: config)
+    monkeypatch.setattr(rp, "_get_model_config", lambda: {})
+    return config
+
+
+def test_model_leg_is_ambiguous_across_distinct_endpoints_too(two_relays_one_model):
+    """Topology reported on the PR by an outside contributor: same model, one key_env per relay,
+    distinct base_urls. The model leg must go silent here as well (it is the signal that is
+    ambiguous, not the endpoint), the requested scope still decides, and each endpoint keeps
+    resolving on its own once the URL survives — the two recovery paths must agree."""
+    assert rp.find_custom_provider_identity_by_model(MODEL) is None
+    assert rp.canonical_custom_identity(
+        model=MODEL, config_provider="relay-echo") == "custom:relay-echo"
+    assert rp.canonical_custom_identity(base_url=RELAY_B) == "custom:relay-echo"
+    assert rp.canonical_custom_identity(base_url=RELAY_A) == "custom:relay-primary"
+
+
 def test_unconfigured_candidate_does_not_cancel_the_url_match(two_scopes_one_url):
     """Fail-closed means "never invent an identity", not "abandon one already recovered from
     the endpoint" — a stale/unknown name must not blank out a resolvable session."""
